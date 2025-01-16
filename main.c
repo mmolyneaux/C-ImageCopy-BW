@@ -8,10 +8,7 @@
 #define CT_SIZE 1024   // Bitmap color table size
 #define HEADER_SIZE 54 // Bitmap file header size
 
-enum ImageType {
-    GRAY = 1,
-    RGB = 3
-};
+enum ImageType { GRAY = 1, RGB = 3 };
 
 typedef struct {
     unsigned char header[HEADER_SIZE];
@@ -30,7 +27,7 @@ typedef struct {
 // returns true if str ends with the correct ext,
 // returns false otherwise.
 bool endsWith(char *str, const char *ext) {
-    
+
     // Check for NULL;
     if (!str || !ext) {
         return false;
@@ -48,9 +45,9 @@ bool endsWith(char *str, const char *ext) {
 
 // free memory allocated for bitmap structs.
 void freeImage(bitmap *bmp) {
-    for(int i = 0; i < bmp->imageSize; i++) {
-        free(bmp->imageBuffer[i]);        
-    }    
+    for (int i = 0; i < bmp->imageSize; i++) {
+        free(bmp->imageBuffer[i]);
+    }
     free(bmp->imageBuffer);
     bmp->imageBuffer = NULL; // Avoid dangling pointer.
 }
@@ -96,23 +93,23 @@ bool readImage(char *filename1, bitmap *bitmapIn) {
     if (bitmapIn->imageBuffer == NULL) {
         return false;
     }
-    
+
     // Allocate memory for each row (RGB values for each pixel)
 
     for (int i = 0; i < IMAGE_SIZE; i++) {
         bitmapIn->imageBuffer[i] =
-            (unsigned char *)malloc(bitmapIn->imageType * sizeof(char*));
+            (unsigned char *)malloc(bitmapIn->imageType * sizeof(char *));
         if (bitmapIn->imageBuffer[i] == NULL) {
             return false;
         }
     }
 
-    for (int i = 0; i < IMAGE_SIZE; i++){
+    for (int i = 0; i < IMAGE_SIZE; i++) {
         bitmapIn->imageBuffer[i][0] = getc(streamIn); // red
         bitmapIn->imageBuffer[i][1] = getc(streamIn); // green
         bitmapIn->imageBuffer[i][2] = getc(streamIn); // blue
     }
-    
+
     fclose(streamIn);
     return true;
 }
@@ -127,17 +124,39 @@ void writeImage(char *filename, bitmap *bitmapIn) {
         fwrite(bitmapIn->colorTable, sizeof(char), CT_SIZE, streamOut);
     }
     size_t imageSize = bitmapIn->width * bitmapIn->height;
-    
+
     uint32_t temp = 0;
-    for (int i = 0; i < imageSize; i++){
+    for (int i = 0; i < imageSize; i++) {
         // the equation for mixing RGB to gray.
-        temp = (bitmapIn->imageBuffer[i][0]*0.3) + (bitmapIn->imageBuffer[i][1]*0.59) + (bitmapIn->imageBuffer[i][2]*0.11);
+        temp = (bitmapIn->imageBuffer[i][0] * 0.3) +
+               (bitmapIn->imageBuffer[i][1] * 0.59) +
+               (bitmapIn->imageBuffer[i][2] * 0.11);
         // Write equally for each channel.
         putc(temp, streamOut); // red
         putc(temp, streamOut); // green
         putc(temp, streamOut); // blue
     }
     fclose(streamOut);
+}
+
+void readArgv(void) {}
+
+void printUsage(char *app_name) {
+    printf("Usage: %s [OPTIONS] <input_filename> [output_filename]\n"
+        "\n"
+        "OPTIONS:\n"
+        "  -h, --help           Show this help message and exit\n"
+        "  -v, --verbose        Enable verbose output\n"
+        "  -o, --output <file>  Specify output file\n"
+        "  --version            Show the program version\n"
+        "\n"
+        "ARGUMENTS:\n"
+        "  <required_filename>  The required filename\n"
+        "  [optional_filename]  An optional second filename\n"
+        "\n"
+        "EXAMPLES:\n"
+        "  myprogram -v input.txt\n"
+        "  myprogram -o output.txt input.txt optional.txt\n", app_name);
 }
 
 int main(int argc, char *argv[]) {
@@ -148,6 +167,9 @@ int main(int argc, char *argv[]) {
     const char *suffix = "_copy";
     const char *extension = ".bmp";
 
+    if (argc == 1) {
+        printUsage(argv[0]);
+    }
     if (argc > 1) {
         filename1 = argv[1];
         printf("Filename1: %s\n", filename1);
