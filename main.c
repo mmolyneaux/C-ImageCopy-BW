@@ -1,14 +1,18 @@
+#include <getopt.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <uchar.h>
+#include <unistd.h>
 
 #define CT_SIZE 1024   // Bitmap color table size
 #define HEADER_SIZE 54 // Bitmap file header size
+#define VERSION "0.4"  // This is the 4th lesson / repo  of this program.
 
 enum ImageType { GRAY = 1, RGB = 3 };
+enum Mode { NO_MODE, COPY, TO_GRAY, TO_BW };
 
 typedef struct {
     unsigned char header[HEADER_SIZE];
@@ -139,67 +143,135 @@ void writeImage(char *filename, bitmap *bitmapIn) {
     fclose(streamOut);
 }
 
-void readArgv(void) {}
+void readArgv() {}
 
-void printUsage(char *app_name) {
+void print_version() { printf("Program version: %s\n", VERSION); }
+
+void print_usage(char *app_name) {
     printf("Usage: %s [OPTIONS] <input_filename> [output_filename]\n"
-        "\n"
-        "OPTIONS:\n"
-        "  -h, --help           Show this help message and exit\n"
-        "  -v, --verbose        Enable verbose output\n"
-        "  -o, --output <file>  Specify output file\n"
-        "  --version            Show the program version\n"
-        "\n"
-        "ARGUMENTS:\n"
-        "  <required_filename>  The required filename\n"
-        "  [optional_filename]  An optional second filename\n"
-        "\n"
-        "EXAMPLES:\n"
-        "  myprogram -v input.txt\n"
-        "  myprogram -o output.txt input.txt optional.txt\n", app_name);
+           "\n"
+           "OPTIONS:\n"
+           "  -h, --help           Show this help message and exit\n"
+           "  -v, --verbose        Enable verbose output\n"
+           "  -o, --output <file>  Specify output file\n"
+           "  --version            Show the program version\n"
+           "\n"
+           "ARGUMENTS:\n"
+           "  <required_filename>  The required filename\n"
+           "  [optional_filename]  An optional second filename\n"
+           "\n"
+           "EXAMPLES:\n"
+           "  myprogram -v input.txt\n"
+           "  myprogram -o output.txt input.txt optional.txt\n",
+           app_name);
 }
 
 int main(int argc, char *argv[]) {
+    enum Mode MODE = NO_MODE; // default
+    int opt = 0;
 
     char *filename1 = NULL;
     char *filename2 = NULL;
-    bool freeFilename2 = false; // filename needs to be freed if this is true.
-    const char *suffix = "_copy";
-    const char *extension = ".bmp";
+    bool filename2_allocated = false;
+    char *suffix = "_suffix"; // default
+    char *extension = ".bmp";
 
+    // if only the program name is called, print usage and exit.
     if (argc == 1) {
-        printUsage(argv[0]);
+        print_usage(argv[0]);
+        exit(EXIT_SUCCESS);
     }
-    if (argc > 1) {
-        filename1 = argv[1];
-        printf("Filename1: %s\n", filename1);
 
-        // confirm filename1 ends with extension
-        if (!endsWith(filename1, extension)) {
-            printf("%s does not end with %s", filename1, extension);
-            return -1;
+    // Parse command-line options
+    bool g_flag = false,      // gray
+        h_flag = false,       // help
+        v_flag = false,       // verbose
+        version_flag = false; // version
+
+    struct option long_options[] = {
+        {"help", no_argument, 0, 'h'},
+        {"verbose", no_argument, 0, 'v'},
+        {"version", no_argument, 0, 0},
+        {
+            0,
+            0,
+            0,
+            0,
+        } // sentinal value indicating the end of the array, for getopt_long in
+          // getopt.h
+    };
+
+    while ((opt = getopt(argc, argv, "ghv")) != -1) {
+        switch (opt) {
+        case 'g': // MODE: TO_GRAY, to grayscale image
+            g_flag = true;
+            break;
+        case 'h': // help
+            print_usage(argv[0]);
+            exit(EXIT_SUCCESS);
+        case 'v': // verbose
+            v_flag = true;
+            break;
+        case 0: // checks for long options not tied to a short option
+            if (strcmp("version", long_options[optind].name) == 0) {
+                print_version();
+                exit(EXIT_SUCCESS);
+            }
+            break;
+        default:
+            print_usage(argv[0]);
+            exit(EXIT_FAILURE);
         }
     }
 
-    // If second filename exists from argv point to that.
-    if (argc > 2) {
-        filename2 = argv[2];
-        // confirm filename2 ends with extension
+    // set the mode
+    if (g_flag) {
+        MODE = TO_GRAY;
+    } else {
+        MODE = COPY;
+    }
+
+    // Check for required filename argument
+    if (optind < argc) {
+        filename1 = argv[optind];
+        optind++;
+    } else {
+        print_usage(argv[0]);
+        exit(EXIT_FAILURE);
+    }
+
+    // Check for optional filename argument
+    if (optind < argc) {
+        filename2 = argv[optind];
+    }
+
+    // ---- Already read all the flags and filenames.
+    // ---- help verbose and version already done
+    // ---- filenames not verified
+    // ---- Already fails if filename1 is null
+
+    // confirm filename1 ends with extension
+    if (!endsWith(filename1, extension)) {
+        fprintf(stderr, "Error: Input file %s does not end with %s\n",
+                filename1, extension);
+        exit(EXIT_FAILURE);
+    }
+    // confirm filename2 ends with extension
+    if (filename2) {
         if (!endsWith(filename2, extension)) {
-            printf("%s does not end with %s", filename2, extension);
-            return -1;
+            printf("Error: Input file %s does not end with %s\n", filename2,
+                   extension);
+            exit(EXIT_FAILURE);
         }
-    }
-    // else create a filename based on the first and allocate memory for the
-    // new name.
-
-    else {
-        // Finds the last position of the  '.' in the filename
+    } else { // create filename2 with proper suffix from mode
+        // Find the last position of the  '.' in the filename
         char *dot_pos = strrchr(filename1, '.');
         if (dot_pos == NULL) {
-            printf("\".\" not found in filename.\n");
-            return -1;
+            fprintf(stderr, "\".\" not found in filename: %s\n", filename1);
+            exit(EXIT_FAILURE);
         }
+
+        // print verbose info
 
         // Calculate the length of the parts
         size_t base_len = dot_pos - filename1;
@@ -210,9 +282,9 @@ int main(int argc, char *argv[]) {
                                    sizeof(char));
         if (filename2 == NULL) {
             printf("Memory allocation for output filename has failed.\n");
-            return -1;
+            exit(EXIT_FAILURE);
         }
-        freeFilename2 = true;
+        filename2_allocated = true;
         // Copy the base part of filename1 and append the suffix and extension.
         // strncpy copies the first base_len number of chars from filename1 into
         // filename2
@@ -221,6 +293,14 @@ int main(int argc, char *argv[]) {
         // strcat because strncpy doesn't null terminate.)
         strcpy(filename2 + base_len, suffix);
         strcpy(filename2 + base_len + suffix_len, extension);
+    }
+
+    if (v_flag) {
+        printf("-g (to gray) flag: %s\n", g_flag ? "true" : "false");
+        printf("-h (help) flag:    %s\n", h_flag ? "true" : "false");
+        printf("-v (verbose) flag: %s\n", v_flag ? "true" : "false");
+        printf("--version flag:    %s\n", version_flag ? "true" : "false");
+        printf("filename1: %s\n", filename1);
     }
 
     bitmap bitmapIn = {.header = {0},
@@ -235,23 +315,29 @@ int main(int argc, char *argv[]) {
 
     bool imageRead = readImage(filename1, &bitmapIn);
     if (!imageRead) {
-        printf("Image read failed.\n");
-        return -1;
+        fprintf(stderr, "Image read failed.\n");
+        exit(EXIT_FAILURE);
     }
-
-    writeImage(filename2, &bitmapIn);
-
-    if (freeFilename2 && filename2 != NULL) {
-        free(filename2);
-        filename2 = NULL;
-        freeFilename2 = false;
-    }
-
-    freeImage(&bitmapIn);
 
     printf("width: %d\n", bitmapIn.width);
     printf("height: %d\n", bitmapIn.height);
     printf("bitDepth: %d\n", bitmapIn.bitDepth);
+
+    switch (MODE) {
+        case COPY:
+            printf("Copy not ported, still gray.\n");
+        case TO_GRAY:
+            writeImage(filename2, &bitmapIn);
+        default:
+            printf("No mode matched.\n");
+    }
+    if (filename2_allocated && filename2 != NULL) {
+        free(filename2);
+        filename2 = NULL;
+        filename2_allocated = false;
+    }
+
+    freeImage(&bitmapIn);
 
     return 0;
 }
