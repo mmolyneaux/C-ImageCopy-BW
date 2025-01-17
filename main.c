@@ -11,9 +11,6 @@
 #define HEADER_SIZE 54 // Bitmap file header size
 #define VERSION "0.4"  // This is the 4th lesson / repo  of this program.
 
-enum ImageType { GRAY = 1, RGB = 3 };
-enum Mode { NO_MODE, COPY, TO_GRAY, TO_BW };
-
 typedef struct {
     unsigned char header[HEADER_SIZE];
     uint32_t width;
@@ -26,6 +23,47 @@ typedef struct {
     unsigned char colorTable[CT_SIZE];
     unsigned char **imageBuffer; //[imgSize][3], 3 for rgb
 } bitmap;
+
+enum ImageType { GRAY = 1, RGB = 3 };
+enum Mode { NO_mode, COPY, TO_GRAY, TO_BW };
+char *mode_to_string(enum Mode mode) {
+    switch (mode) {
+    case NO_mode:
+        return "No mode selected";
+        break;
+    case COPY:
+        return "Copy only";
+        break;
+    case TO_GRAY:
+        return "to Grayscale";
+        break;
+    case TO_BW:
+        return "to Black & White";
+        break;
+    default:
+        return "mode not found";    
+    }
+}
+char* get_suffix(enum Mode mode) {
+    switch (mode) {
+    case NO_mode:
+        return "_none";
+        break;
+    case COPY:
+        return "_copy";
+        break;
+    case TO_GRAY:
+        return "_gray";
+        break;
+    case TO_BW:
+        return "_bw";
+        break;
+    default:
+        return "_def";    
+    }
+}
+
+
 
 // helper function, verify a filename ends with extension.
 // returns true if str ends with the correct ext,
@@ -153,21 +191,20 @@ void print_usage(char *app_name) {
            "OPTIONS:\n"
            "  -h, --help           Show this help message and exit\n"
            "  -v, --verbose        Enable verbose output\n"
-           "  -o, --output <file>  Specify output file\n"
            "  --version            Show the program version\n"
            "\n"
            "ARGUMENTS:\n"
-           "  <required_filename>  The required filename\n"
-           "  [optional_filename]  An optional second filename\n"
+           "  <input_filename>  The required input filename\n"
+           "  [output_filename]  An optional output filename\n"
            "\n"
            "EXAMPLES:\n"
-           "  myprogram -v input.txt\n"
-           "  myprogram -o output.txt input.txt optional.txt\n",
+           "  myprogram -v -g input.bmp\n"
+           "  myprogram input.bmp output.bmp\n",
            app_name);
 }
 
 int main(int argc, char *argv[]) {
-    enum Mode MODE = NO_MODE; // default
+    enum Mode mode = NO_mode; // default
     int opt = 0;
 
     char *filename1 = NULL;
@@ -203,7 +240,7 @@ int main(int argc, char *argv[]) {
 
     while ((opt = getopt(argc, argv, "ghv")) != -1) {
         switch (opt) {
-        case 'g': // MODE: TO_GRAY, to grayscale image
+        case 'g': // mode: TO_GRAY, to grayscale image
             g_flag = true;
             break;
         case 'h': // help
@@ -226,9 +263,9 @@ int main(int argc, char *argv[]) {
 
     // set the mode
     if (g_flag) {
-        MODE = TO_GRAY;
+        mode = TO_GRAY;
     } else {
-        MODE = COPY;
+        mode = COPY;
     }
 
     // Check for required filename argument
@@ -271,7 +308,7 @@ int main(int argc, char *argv[]) {
             exit(EXIT_FAILURE);
         }
 
-        // print verbose info
+        suffix = get_suffix(mode);
 
         // Calculate the length of the parts
         size_t base_len = dot_pos - filename1;
@@ -301,6 +338,9 @@ int main(int argc, char *argv[]) {
         printf("-v (verbose) flag: %s\n", v_flag ? "true" : "false");
         printf("--version flag:    %s\n", version_flag ? "true" : "false");
         printf("filename1: %s\n", filename1);
+        if (filename2)
+            printf("filename2: %s\n", filename2);
+        printf("mode: %s\n", mode_to_string(mode));
     }
 
     bitmap bitmapIn = {.header = {0},
@@ -323,14 +363,16 @@ int main(int argc, char *argv[]) {
     printf("height: %d\n", bitmapIn.height);
     printf("bitDepth: %d\n", bitmapIn.bitDepth);
 
-    switch (MODE) {
-        case COPY:
-            printf("Copy not ported, still gray.\n");
-        case TO_GRAY:
-            writeImage(filename2, &bitmapIn);
-        default:
-            printf("No mode matched.\n");
+    switch (mode) {
+    case COPY:
+        printf("Copy not ported, still gray.\n");
+    case TO_GRAY:
+        writeImage(filename2, &bitmapIn);
+        break;
+    default:
+        printf("No mode matched.\n");
     }
+    // free filename2 memory if it was allocated
     if (filename2_allocated && filename2 != NULL) {
         free(filename2);
         filename2 = NULL;
