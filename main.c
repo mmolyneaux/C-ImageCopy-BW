@@ -18,11 +18,10 @@ typedef struct {
     unsigned char header[HEADER_SIZE];
     uint32_t width;
     uint32_t height;
+    uint32_t imageSize;
     uint32_t bitDepth;
     uint32_t imageType; // 1 for gray, 3 for color,might end up having to do
                         // with bitdepth.
-    uint32_t imageSize; // TODO: ambiguous input or output and I calculate it in
-                        // every function
     enum Mode output_mode;
     bool CT_EXISTS;
     unsigned char colorTable[CT_SIZE];
@@ -88,11 +87,13 @@ bool endsWith(char *str, const char *ext) {
 
 // free memory allocated for bitmap structs.
 void freeImage(bitmap *bmp) {
-    for (int i = 0; i < bmp->imageSize; i++) {
-        free(bmp->imageBuffer[i]);
+    if (bmp && bmp->imageBuffer) {
+        for (int i = 0; i < bmp->imageSize; i++) {
+            free(bmp->imageBuffer[i]);
+        }
+        free(bmp->imageBuffer);
+        bmp->imageBuffer = NULL; // Avoid dangling pointer.
     }
-    free(bmp->imageBuffer);
-    bmp->imageBuffer = NULL; // Avoid dangling pointer.
 }
 // returns false early and prints an error message if operation not complete.
 // returns true on success of the operation.
@@ -115,8 +116,7 @@ bool readImage(char *filename1, bitmap *bitmapIn) {
     bitmapIn->width = *(int *)&bitmapIn->header[18];
     bitmapIn->height = *(int *)&bitmapIn->header[22];
     bitmapIn->bitDepth = *(int *)&bitmapIn->header[28];
-
-    const size_t IMAGE_SIZE = bitmapIn->width * bitmapIn->height;
+    bitmapIn->imageSize  = bitmapIn->width * bitmapIn->height;
 
     // if the bit depth is less than or equal to 8 then we need to read the
     // color table. The read content is going to be stored in colorTable.
@@ -132,14 +132,14 @@ bool readImage(char *filename1, bitmap *bitmapIn) {
     // Allocate memory for the array of pointers (rows) for each pixel in
     // imagesize
     bitmapIn->imageBuffer =
-        (unsigned char **)malloc(sizeof(char *) * IMAGE_SIZE);
+        (unsigned char **)malloc(sizeof(char *) * bitmapIn->imageSize);
     if (bitmapIn->imageBuffer == NULL) {
         return false;
     }
 
     // Allocate memory for each row (RGB values for each pixel)
 
-    for (int i = 0; i < IMAGE_SIZE; i++) {
+    for (int i = 0; i < bitmapIn->imageSize; i++) {
         bitmapIn->imageBuffer[i] =
             (unsigned char *)malloc(bitmapIn->imageType * sizeof(char *));
         if (bitmapIn->imageBuffer[i] == NULL) {
@@ -147,7 +147,7 @@ bool readImage(char *filename1, bitmap *bitmapIn) {
         }
     }
 
-    for (int i = 0; i < IMAGE_SIZE; i++) {
+    for (int i = 0; i < bitmapIn->imageSize; i++) {
         bitmapIn->imageBuffer[i][0] = getc(streamIn); // red
         bitmapIn->imageBuffer[i][1] = getc(streamIn); // green
         bitmapIn->imageBuffer[i][2] = getc(streamIn); // blue
@@ -165,8 +165,7 @@ void writeImage(char *filename, bitmap *bitmap) {
     if (bitmap->CT_EXISTS) {
         fwrite(bitmap->colorTable, sizeof(char), CT_SIZE, streamOut);
     }
-    size_t imageSize = bitmap->width * bitmap->height;
-
+   
     // amount of rgb to keep, from 0.0 to 1.0.
     float r = 0.0;
     float g = 0.0;
@@ -176,7 +175,7 @@ void writeImage(char *filename, bitmap *bitmap) {
     printf("bitmap->output_mode: %d, COPY mode: %d", bitmap->output_mode, COPY);
     if (bitmap->output_mode == COPY) {
 
-        for (int i = 0; i < imageSize; i++) {
+        for (int i = 0; i < bitmap->imageSize; i++) {
             // Write equally for each channel.
             putc(bitmap->imageBuffer[i][0], streamOut); // red
             putc(bitmap->imageBuffer[i][1], streamOut); // green
@@ -190,7 +189,7 @@ void writeImage(char *filename, bitmap *bitmap) {
         b = 0.11;
 
         uint32_t temp = 0;
-        for (int i = 0; i < imageSize; i++) {
+        for (int i = 0; i < bitmap->imageSize; i++) {
             temp = (bitmap->imageBuffer[i][0] * r) +
                    (bitmap->imageBuffer[i][1] * g) +
                    (bitmap->imageBuffer[i][2] * b);
@@ -205,7 +204,7 @@ void writeImage(char *filename, bitmap *bitmap) {
         fprintf(stderr, "R: %.2f\nG: %.2f B:%.2f\n", r, g, b);
         exit(EXIT_FAILURE);
     }
-    
+
     fclose(streamOut);
 }
 
