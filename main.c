@@ -26,7 +26,7 @@ typedef struct {
     bool CT_EXISTS;
     unsigned char colorTable[CT_SIZE];
     unsigned char **imageBuffer; //[imgSize][3], 3 for rgb
-} bitmap;
+} Bitmap;
 
 char *mode_to_string(enum Mode mode) {
     switch (mode) {
@@ -86,7 +86,7 @@ bool endsWith(char *str, const char *ext) {
 }
 
 // free memory allocated for bitmap structs.
-void freeImage(bitmap *bmp) {
+void freeImage(Bitmap *bmp) {
     if (bmp && bmp->imageBuffer) {
         for (int i = 0; i < bmp->imageSize; i++) {
             free(bmp->imageBuffer[i]);
@@ -97,8 +97,8 @@ void freeImage(bitmap *bmp) {
 }
 // returns false early and prints an error message if operation not complete.
 // returns true on success of the operation.
-bool readImage(char *filename1, bitmap *bitmapIn) {
-    bitmapIn->imageType = 3; // multiplier for RGB
+bool readImage(char *filename1, Bitmap *bitmap) {
+    bitmap->imageType = 3; // multiplier for RGB
 
     FILE *streamIn = fopen(filename1, "rb");
     if (streamIn == NULL) {
@@ -106,64 +106,64 @@ bool readImage(char *filename1, bitmap *bitmapIn) {
         return false;
     }
     for (int i = 0; i < HEADER_SIZE; i++) {
-        bitmapIn->header[i] = getc(streamIn);
+        bitmap->header[i] = getc(streamIn);
     }
 
     // width starts at address of byte(char) 18, which is then cast to an
     // int*, so it can be dereferenced into an int, so it is cast to a 4
     // byte int instead stead of a single byte from the char header array.
     // Then the height can be retreived from the next 4 byts and so on.
-    bitmapIn->width = *(int *)&bitmapIn->header[18];
-    bitmapIn->height = *(int *)&bitmapIn->header[22];
-    bitmapIn->bitDepth = *(int *)&bitmapIn->header[28];
-    bitmapIn->imageSize  = bitmapIn->width * bitmapIn->height;
+    bitmap->width = *(int *)&bitmap->header[18];
+    bitmap->height = *(int *)&bitmap->header[22];
+    bitmap->bitDepth = *(int *)&bitmap->header[28];
+    bitmap->imageSize  = bitmap->width * bitmap->height;
 
     // if the bit depth is less than or equal to 8 then we need to read the
     // color table. The read content is going to be stored in colorTable.
     // Not all bitmap images have color tables.
-    if (bitmapIn->bitDepth <=
+    if (bitmap->bitDepth <=
         8) { // by definition of bitmap, <= 8 has a color table
-        bitmapIn->CT_EXISTS = true;
+        bitmap->CT_EXISTS = true;
     }
 
-    if (bitmapIn->CT_EXISTS) {
-        fread(bitmapIn->colorTable, sizeof(char), CT_SIZE, streamIn);
+    if (bitmap->CT_EXISTS) {
+        fread(bitmap->colorTable, sizeof(char), CT_SIZE, streamIn);
     }
     // Allocate memory for the array of pointers (rows) for each pixel in
     // imagesize
-    bitmapIn->imageBuffer =
-        (unsigned char **)malloc(sizeof(char *) * bitmapIn->imageSize);
-    if (bitmapIn->imageBuffer == NULL) {
+    bitmap->imageBuffer =
+        (unsigned char **)malloc(sizeof(char *) * bitmap->imageSize);
+    if (bitmap->imageBuffer == NULL) {
         return false;
     }
 
     // Allocate memory for each row (RGB values for each pixel)
 
-    for (int i = 0; i < bitmapIn->imageSize; i++) {
-        bitmapIn->imageBuffer[i] =
-            (unsigned char *)malloc(bitmapIn->imageType * sizeof(char *));
-        if (bitmapIn->imageBuffer[i] == NULL) {
+    for (int i = 0; i < bitmap->imageSize; i++) {
+        bitmap->imageBuffer[i] =
+            (unsigned char *)malloc(bitmap->imageType * sizeof(char *));
+        if (bitmap->imageBuffer[i] == NULL) {
             return false;
         }
     }
 
-    for (int i = 0; i < bitmapIn->imageSize; i++) {
-        bitmapIn->imageBuffer[i][0] = getc(streamIn); // red
-        bitmapIn->imageBuffer[i][1] = getc(streamIn); // green
-        bitmapIn->imageBuffer[i][2] = getc(streamIn); // blue
+    for (int i = 0; i < bitmap->imageSize; i++) {
+        bitmap->imageBuffer[i][0] = getc(streamIn); // red
+        bitmap->imageBuffer[i][1] = getc(streamIn); // green
+        bitmap->imageBuffer[i][2] = getc(streamIn); // blue
     }
 
     fclose(streamIn);
     return true;
 }
 
-void writeImage(char *filename, bitmap *bitmap) {
+void writeImage(char *filename, Bitmap *bmp) {
     FILE *streamOut = fopen(filename, "wb");
 
-    fwrite(bitmap->header, sizeof(char), HEADER_SIZE, streamOut);
+    fwrite(bmp->header, sizeof(char), HEADER_SIZE, streamOut);
 
-    if (bitmap->CT_EXISTS) {
-        fwrite(bitmap->colorTable, sizeof(char), CT_SIZE, streamOut);
+    if (bmp->CT_EXISTS) {
+        fwrite(bmp->colorTable, sizeof(char), CT_SIZE, streamOut);
     }
    
     // amount of rgb to keep, from 0.0 to 1.0.
@@ -171,28 +171,27 @@ void writeImage(char *filename, bitmap *bitmap) {
     float g = 0.0;
     float b = 0.0;
 
-    printf("RGB settings: %s\n", mode_to_string(bitmap->output_mode));
-    printf("bitmap->output_mode: %d, COPY mode: %d", bitmap->output_mode, COPY);
-    if (bitmap->output_mode == COPY) {
+    printf("RGB settings: %s\n", mode_to_string(bmp->output_mode));
+    if (bmp->output_mode == COPY) {
 
-        for (int i = 0; i < bitmap->imageSize; i++) {
+        for (int i = 0; i < bmp->imageSize; i++) {
             // Write equally for each channel.
-            putc(bitmap->imageBuffer[i][0], streamOut); // red
-            putc(bitmap->imageBuffer[i][1], streamOut); // green
-            putc(bitmap->imageBuffer[i][2], streamOut); // blue
+            putc(bmp->imageBuffer[i][0], streamOut); // red
+            putc(bmp->imageBuffer[i][1], streamOut); // green
+            putc(bmp->imageBuffer[i][2], streamOut); // blue
         }
 
-    } else if (bitmap->output_mode == TO_GRAY) {
+    } else if (bmp->output_mode == TO_GRAY) {
         // the values for mixing RGB to gray.
         r = 0.30;
         g = 0.59;
         b = 0.11;
 
         uint32_t temp = 0;
-        for (int i = 0; i < bitmap->imageSize; i++) {
-            temp = (bitmap->imageBuffer[i][0] * r) +
-                   (bitmap->imageBuffer[i][1] * g) +
-                   (bitmap->imageBuffer[i][2] * b);
+        for (int i = 0; i < bmp->imageSize; i++) {
+            temp = (bmp->imageBuffer[i][0] * r) +
+                   (bmp->imageBuffer[i][1] * g) +
+                   (bmp->imageBuffer[i][2] * b);
             // Write equally for each channel.
             putc(temp, streamOut); // red
             putc(temp, streamOut); // green
@@ -207,8 +206,6 @@ void writeImage(char *filename, bitmap *bitmap) {
 
     fclose(streamOut);
 }
-
-void readArgv() {}
 
 void print_version() { printf("Program version: %s\n", VERSION); }
 
@@ -370,7 +367,7 @@ int main(int argc, char *argv[]) {
         printf("mode: %s\n", mode_to_string(mode));
     }
 
-    bitmap bitmapIn = {.header = {0},
+    Bitmap bitmap = {.header = {0},
                        .width = 0,
                        .height = 0,
                        .bitDepth = 0,
@@ -381,28 +378,28 @@ int main(int argc, char *argv[]) {
                        .imageBuffer = NULL,
                        .output_mode = NO_MODE};
 
-    bool imageRead = readImage(filename1, &bitmapIn);
+    bool imageRead = readImage(filename1, &bitmap);
     if (!imageRead) {
         fprintf(stderr, "Image read failed.\n");
         exit(EXIT_FAILURE);
     }
 
-    printf("width: %d\n", bitmapIn.width);
-    printf("height: %d\n", bitmapIn.height);
-    printf("bitDepth: %d\n", bitmapIn.bitDepth);
+    printf("width: %d\n", bitmap.width);
+    printf("height: %d\n", bitmap.height);
+    printf("bitDepth: %d\n", bitmap.bitDepth);
 
     switch (mode) {
     case COPY:
-        bitmapIn.output_mode = COPY;
+        bitmap.output_mode = COPY;
         break;
     case TO_GRAY:
-        bitmapIn.output_mode = TO_GRAY;
+        bitmap.output_mode = TO_GRAY;
         break;
     default:
         fprintf(stderr, "No output mode matched.\n");
         exit(EXIT_FAILURE);
     }
-    writeImage(filename2, &bitmapIn);
+    writeImage(filename2, &bitmap);
 
     // free filename2 memory if it was allocated
     if (filename2_allocated && filename2 != NULL) {
@@ -410,8 +407,8 @@ int main(int argc, char *argv[]) {
         filename2 = NULL;
         filename2_allocated = false;
     }
-
-    freeImage(&bitmapIn);
+ 
+    freeImage(&bitmap);
 
     return 0;
 }
