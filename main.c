@@ -11,6 +11,9 @@
 #define HEADER_SIZE 54 // Bitmap file header size
 #define VERSION "0.4"  // This is the 4th lesson / repo  of this program.
 
+enum ImageType { GRAY = 1, RGB = 3 };
+enum Mode { NO_MODE, COPY, TO_GRAY, TO_BW };
+
 typedef struct {
     unsigned char header[HEADER_SIZE];
     uint32_t width;
@@ -18,17 +21,17 @@ typedef struct {
     uint32_t bitDepth;
     uint32_t imageType; // 1 for gray, 3 for color,might end up having to do
                         // with bitdepth.
-    uint32_t imageSize;
+    uint32_t imageSize; // TODO: ambiguous input or output and I calculate it in
+                        // every function
+    enum Mode output_mode;
     bool CT_EXISTS;
     unsigned char colorTable[CT_SIZE];
     unsigned char **imageBuffer; //[imgSize][3], 3 for rgb
 } bitmap;
 
-enum ImageType { GRAY = 1, RGB = 3 };
-enum Mode { NO_mode, COPY, TO_GRAY, TO_BW };
 char *mode_to_string(enum Mode mode) {
     switch (mode) {
-    case NO_mode:
+    case NO_MODE:
         return "No mode selected";
         break;
     case COPY:
@@ -41,12 +44,12 @@ char *mode_to_string(enum Mode mode) {
         return "to Black & White";
         break;
     default:
-        return "mode not found";    
+        return "default / mode not found";
     }
 }
-char* get_suffix(enum Mode mode) {
+char *get_suffix(enum Mode mode) {
     switch (mode) {
-    case NO_mode:
+    case NO_MODE:
         return "_none";
         break;
     case COPY:
@@ -59,11 +62,9 @@ char* get_suffix(enum Mode mode) {
         return "_bw";
         break;
     default:
-        return "_def";    
+        return "_def";
     }
 }
-
-
 
 // helper function, verify a filename ends with extension.
 // returns true if str ends with the correct ext,
@@ -156,28 +157,55 @@ bool readImage(char *filename1, bitmap *bitmapIn) {
     return true;
 }
 
-void writeImage(char *filename, bitmap *bitmapIn) {
+void writeImage(char *filename, bitmap *bitmap) {
     FILE *streamOut = fopen(filename, "wb");
-    printf("Filename2: %s\n", filename);
 
-    fwrite(bitmapIn->header, sizeof(char), HEADER_SIZE, streamOut);
+    fwrite(bitmap->header, sizeof(char), HEADER_SIZE, streamOut);
 
-    if (bitmapIn->CT_EXISTS) {
-        fwrite(bitmapIn->colorTable, sizeof(char), CT_SIZE, streamOut);
+    if (bitmap->CT_EXISTS) {
+        fwrite(bitmap->colorTable, sizeof(char), CT_SIZE, streamOut);
     }
-    size_t imageSize = bitmapIn->width * bitmapIn->height;
+    size_t imageSize = bitmap->width * bitmap->height;
 
-    uint32_t temp = 0;
-    for (int i = 0; i < imageSize; i++) {
-        // the equation for mixing RGB to gray.
-        temp = (bitmapIn->imageBuffer[i][0] * 0.3) +
-               (bitmapIn->imageBuffer[i][1] * 0.59) +
-               (bitmapIn->imageBuffer[i][2] * 0.11);
-        // Write equally for each channel.
-        putc(temp, streamOut); // red
-        putc(temp, streamOut); // green
-        putc(temp, streamOut); // blue
+    // amount of rgb to keep, from 0.0 to 1.0.
+    float r = 0.0;
+    float g = 0.0;
+    float b = 0.0;
+
+    printf("RGB settings: %s\n", mode_to_string(bitmap->output_mode));
+    printf("bitmap->output_mode: %d, COPY mode: %d", bitmap->output_mode, COPY);
+    if (bitmap->output_mode == COPY) {
+
+        for (int i = 0; i < imageSize; i++) {
+            // Write equally for each channel.
+            putc(bitmap->imageBuffer[i][0], streamOut); // red
+            putc(bitmap->imageBuffer[i][1], streamOut); // green
+            putc(bitmap->imageBuffer[i][2], streamOut); // blue
+        }
+
+    } else if (bitmap->output_mode == TO_GRAY) {
+        // the values for mixing RGB to gray.
+        r = 0.30;
+        g = 0.59;
+        b = 0.11;
+
+        uint32_t temp = 0;
+        for (int i = 0; i < imageSize; i++) {
+            temp = (bitmap->imageBuffer[i][0] * r) +
+                   (bitmap->imageBuffer[i][1] * g) +
+                   (bitmap->imageBuffer[i][2] * b);
+            // Write equally for each channel.
+            putc(temp, streamOut); // red
+            putc(temp, streamOut); // green
+            putc(temp, streamOut); // blue
+        }
+
+    } else {
+        fprintf(stderr, "Failed to set RGB\n");
+        fprintf(stderr, "R: %.2f\nG: %.2f B:%.2f\n", r, g, b);
+        exit(EXIT_FAILURE);
     }
+    
     fclose(streamOut);
 }
 
@@ -204,7 +232,7 @@ void print_usage(char *app_name) {
 }
 
 int main(int argc, char *argv[]) {
-    enum Mode mode = NO_mode; // default
+    enum Mode mode = NO_MODE; // default
     int opt = 0;
 
     char *filename1 = NULL;
@@ -234,8 +262,8 @@ int main(int argc, char *argv[]) {
             0,
             0,
             0,
-        } // sentinal value indicating the end of the array, for getopt_long in
-          // getopt.h
+        } // sentinal value indicating the end of the array, for getopt_long
+          // in getopt.h
     };
 
     while ((opt = getopt(argc, argv, "ghv")) != -1) {
@@ -322,12 +350,12 @@ int main(int argc, char *argv[]) {
             exit(EXIT_FAILURE);
         }
         filename2_allocated = true;
-        // Copy the base part of filename1 and append the suffix and extension.
-        // strncpy copies the first base_len number of chars from filename1 into
-        // filename2
+        // Copy the base part of filename1 and append the suffix and
+        // extension. strncpy copies the first base_len number of chars from
+        // filename1 into filename2
         strncpy(filename2, filename1, base_len);
-        // use ptr math to copy suffix to filename2ptr's + position + (can't use
-        // strcat because strncpy doesn't null terminate.)
+        // use ptr math to copy suffix to filename2ptr's + position + (can't
+        // use strcat because strncpy doesn't null terminate.)
         strcpy(filename2 + base_len, suffix);
         strcpy(filename2 + base_len + suffix_len, extension);
     }
@@ -351,7 +379,8 @@ int main(int argc, char *argv[]) {
                        .imageType = 0,
                        .CT_EXISTS = false,
                        .colorTable = {0},
-                       .imageBuffer = NULL};
+                       .imageBuffer = NULL,
+                       .output_mode = NO_MODE};
 
     bool imageRead = readImage(filename1, &bitmapIn);
     if (!imageRead) {
@@ -365,13 +394,17 @@ int main(int argc, char *argv[]) {
 
     switch (mode) {
     case COPY:
-        printf("Copy not ported, still gray.\n");
+        bitmapIn.output_mode = COPY;
+        break;
     case TO_GRAY:
-        writeImage(filename2, &bitmapIn);
+        bitmapIn.output_mode = TO_GRAY;
         break;
     default:
-        printf("No mode matched.\n");
+        fprintf(stderr, "No output mode matched.\n");
+        exit(EXIT_FAILURE);
     }
+    writeImage(filename2, &bitmapIn);
+
     // free filename2 memory if it was allocated
     if (filename2_allocated && filename2 != NULL) {
         free(filename2);
