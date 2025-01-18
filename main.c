@@ -116,7 +116,7 @@ bool readImage(char *filename1, Bitmap *bitmap) {
     bitmap->width = *(int *)&bitmap->header[18];
     bitmap->height = *(int *)&bitmap->header[22];
     bitmap->bitDepth = *(int *)&bitmap->header[28];
-    bitmap->imageSize  = bitmap->width * bitmap->height;
+    bitmap->imageSize = bitmap->width * bitmap->height;
 
     // if the bit depth is less than or equal to 8 then we need to read the
     // color table. The read content is going to be stored in colorTable.
@@ -165,7 +165,7 @@ void writeImage(char *filename, Bitmap *bmp) {
     if (bmp->CT_EXISTS) {
         fwrite(bmp->colorTable, sizeof(char), CT_SIZE, streamOut);
     }
-   
+
     // amount of rgb to keep, from 0.0 to 1.0.
     float r = 0.0;
     float g = 0.0;
@@ -189,8 +189,7 @@ void writeImage(char *filename, Bitmap *bmp) {
 
         uint32_t temp = 0;
         for (int i = 0; i < bmp->imageSize; i++) {
-            temp = (bmp->imageBuffer[i][0] * r) +
-                   (bmp->imageBuffer[i][1] * g) +
+            temp = (bmp->imageBuffer[i][0] * r) + (bmp->imageBuffer[i][1] * g) +
                    (bmp->imageBuffer[i][2] * b);
             // Write equally for each channel.
             putc(temp, streamOut); // red
@@ -306,11 +305,6 @@ int main(int argc, char *argv[]) {
         filename2 = argv[optind];
     }
 
-    // ---- Already read all the flags and filenames.
-    // ---- help verbose and version already done
-    // ---- filenames not verified
-    // ---- Already fails if filename1 is null
-
     // confirm filename1 ends with extension
     if (!endsWith(filename1, extension)) {
         fprintf(stderr, "Error: Input file %s does not end with %s\n",
@@ -368,38 +362,39 @@ int main(int argc, char *argv[]) {
     }
 
     Bitmap bitmap = {.header = {0},
-                       .width = 0,
-                       .height = 0,
-                       .bitDepth = 0,
-                       .imageSize = 0,
-                       .imageType = 0,
-                       .CT_EXISTS = false,
-                       .colorTable = {0},
-                       .imageBuffer = NULL,
-                       .output_mode = NO_MODE};
+                     .width = 0,
+                     .height = 0,
+                     .bitDepth = 0,
+                     .imageSize = 0,
+                     .imageType = 0,
+                     .CT_EXISTS = false,
+                     .colorTable = {0},
+                     .imageBuffer = NULL,
+                     .output_mode = NO_MODE};
+    Bitmap *bitmapPtr = &bitmap;
 
-    bool imageRead = readImage(filename1, &bitmap);
+    bool imageRead = readImage(filename1, bitmapPtr);
     if (!imageRead) {
         fprintf(stderr, "Image read failed.\n");
         exit(EXIT_FAILURE);
     }
 
-    printf("width: %d\n", bitmap.width);
-    printf("height: %d\n", bitmap.height);
-    printf("bitDepth: %d\n", bitmap.bitDepth);
+    printf("width: %d\n", bitmapPtr->width);
+    printf("height: %d\n", bitmapPtr->height);
+    printf("bitDepth: %d\n", bitmapPtr->bitDepth);
 
     switch (mode) {
     case COPY:
-        bitmap.output_mode = COPY;
+        bitmapPtr->output_mode = COPY;
         break;
     case TO_GRAY:
-        bitmap.output_mode = TO_GRAY;
+        bitmapPtr->output_mode = TO_GRAY;
         break;
     default:
         fprintf(stderr, "No output mode matched.\n");
         exit(EXIT_FAILURE);
     }
-    writeImage(filename2, &bitmap);
+    writeImage(filename2, bitmapPtr);
 
     // free filename2 memory if it was allocated
     if (filename2_allocated && filename2 != NULL) {
@@ -407,8 +402,8 @@ int main(int argc, char *argv[]) {
         filename2 = NULL;
         filename2_allocated = false;
     }
- 
-    freeImage(&bitmap);
+
+    freeImage(bitmapPtr);
 
     return 0;
 }
