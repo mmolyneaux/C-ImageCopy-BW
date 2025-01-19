@@ -10,9 +10,11 @@
 #define HEADER_SIZE 54 // Bitmap file header size of every bmp
 #define CT_SIZE                                                                \
     1024 // Bitmap color table size if it's needed, if bitdepth <= 8 by def.
+#define WHITE 255
+#define BLACK 0
 #define VERSION "0.4" // This is the 4th lesson / repo  of this program.
 
-enum ImageType { GRAY = 1, RGB = 3 };
+// enum ImageType { GRAY = 1, RGB = 3, RGBA = 4 };
 enum Mode { NO_MODE, COPY, TO_GRAY, TO_MONO };
 
 typedef struct {
@@ -20,9 +22,10 @@ typedef struct {
     uint32_t width;
     uint32_t height;
     uint32_t imageSize;
-    uint32_t bitDepth;
-    uint32_t imageType; // 1 for gray, 3 for color,might end up having to do
-                        // with bitdepth.
+    uint8_t bitDepth;
+    uint8_t channels;
+    // uint32_t imageType; // 1 for gray, 3 for color,might end up having to do
+    //  with bitdepth.
     enum Mode output_mode;
     bool CT_EXISTS;
     unsigned char *colorTable;
@@ -99,7 +102,8 @@ void freeImage(Bitmap *bmp) {
 // returns false early and prints an error message if operation not complete.
 // returns true on success of the operation.
 bool readImage(char *filename1, Bitmap *bitmap) {
-    bitmap->imageType = 3; // RGB
+    // bitmap->imageType = 3; // RGB
+    bool file_read_completed = false;
 
     FILE *streamIn = fopen(filename1, "rb");
     if (streamIn == NULL) {
@@ -123,45 +127,54 @@ bool readImage(char *filename1, Bitmap *bitmap) {
     // color table. The read content is going to be stored in colorTable.
     // Not all bitmap images have color tables.
     if (bitmap->bitDepth <= 8) {
+        bitmap->channels = 1;
         bitmap->CT_EXISTS = true;
 
         // Allocate memory for colorTable
-        bitmap->colorTable =
-            (unsigned char *)malloc(sizeof(char *) * CT_SIZE);
+        bitmap->colorTable = (unsigned char *)malloc(sizeof(char *) * CT_SIZE);
         if (bitmap->imageBuffer == NULL) {
-            fprintf(stderr, "Error: Failed to allocate memory for color table.\n");
+            fprintf(stderr,
+                    "Error: Failed to allocate memory for color table.\n");
             return false;
         }
 
         fread(bitmap->colorTable, sizeof(char), CT_SIZE, streamIn);
-    }
-    // Allocate memory for the array of pointers (rows) for each pixel in
-    // imagesize
-    bitmap->imageBuffer =
-        (unsigned char **)malloc(sizeof(char *) * bitmap->imageSize);
-    if (bitmap->imageBuffer == NULL) {
-            fprintf(stderr, "Error: Failed to allocate memory for image buffer.\n");
-        return false;
+    } else {
+        bitmap->channels = bitmap->bitDepth /
+                           8; // 24 bit is 3 channel rbg, 32 bit is 32 bit rgba
     }
 
-    // Allocate memory for each row (RGB values for each pixel)
+    if (bitmap->channels == 3) {
 
-    for (int i = 0; i < bitmap->imageSize; i++) {
-        bitmap->imageBuffer[i] =
-            (unsigned char *)malloc(bitmap->imageType * sizeof(char *));
-        if (bitmap->imageBuffer[i] == NULL) {
+        // Allocate memory for the array of pointers (rows) for each pixel in
+        // imagesize
+        bitmap->imageBuffer =
+            (unsigned char **)malloc(sizeof(char *) * bitmap->imageSize);
+        if (bitmap->imageBuffer == NULL) {
+            fprintf(stderr,
+                    "Error: Failed to allocate memory for image buffer.\n");
             return false;
         }
-    }
 
-    for (int i = 0; i < bitmap->imageSize; i++) {
-        bitmap->imageBuffer[i][0] = getc(streamIn); // red
-        bitmap->imageBuffer[i][1] = getc(streamIn); // green
-        bitmap->imageBuffer[i][2] = getc(streamIn); // blue
-    }
+        // Allocate memory for each row (RGB values for each pixel)
 
+        for (int i = 0; i < bitmap->imageSize; i++) {
+            bitmap->imageBuffer[i] =
+                (unsigned char *)malloc(bitmap->channels * sizeof(char *));
+            if (bitmap->imageBuffer[i] == NULL) {
+                return false;
+            }
+        }
+
+        for (int i = 0; i < bitmap->imageSize; i++) {
+            bitmap->imageBuffer[i][0] = getc(streamIn); // red
+            bitmap->imageBuffer[i][1] = getc(streamIn); // green
+            bitmap->imageBuffer[i][2] = getc(streamIn); // blue
+        }
+    file_read_completed = true;
+    }
     fclose(streamIn);
-    return true;
+    return file_read_completed;
 }
 
 void writeImage(char *filename, Bitmap *bmp) {
@@ -220,7 +233,7 @@ void print_usage(char *app_name) {
            "\n"
            "OPTIONS:\n"
            "  -g                   Convert image to grayscale\n"
-           "  -m (optional_separation_value: 0.0 to 1.0, defaults to 0.5)"
+           "  -m (optional_threshold_value: 0.0 to 1.0, defaults to 0.5)"
            "                       Convert image to monochrome\n"
            "  -h, --help           Show this help message and exit\n"
            "  -v, --verbose        Enable verbose output\n"
@@ -259,7 +272,8 @@ int main(int argc, char *argv[]) {
         v_flag = false,       // verbose
         version_flag = false; // version
 
-    float m_value = 0.5; // Default value to convert to monocrome
+    float m_value =
+        0.5; // Default threshold to convert to black(0.0) or white (1.0)
 
     struct option long_options[] = {
         {"help", no_argument, 0, 'h'},
@@ -391,7 +405,8 @@ int main(int argc, char *argv[]) {
                      .height = 0,
                      .bitDepth = 0,
                      .imageSize = 0,
-                     .imageType = 0,
+                     .channels = 0,
+                     //.imageType = 0,
                      .CT_EXISTS = false,
                      .colorTable = NULL,
                      .imageBuffer = NULL,
@@ -414,6 +429,9 @@ int main(int argc, char *argv[]) {
         break;
     case TO_GRAY:
         bitmapPtr->output_mode = TO_GRAY;
+        break;
+    case TO_MONO:
+        bitmapPtr->output_mode = TO_MONO;
         break;
     default:
         fprintf(stderr, "No output mode matched.\n");
