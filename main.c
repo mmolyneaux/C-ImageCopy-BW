@@ -7,12 +7,13 @@
 #include <uchar.h>
 #include <unistd.h>
 
-#define CT_SIZE 1024   // Bitmap color table size
-#define HEADER_SIZE 54 // Bitmap file header size
-#define VERSION "0.4"  // This is the 4th lesson / repo  of this program.
+#define HEADER_SIZE 54 // Bitmap file header size of every bmp
+#define CT_SIZE                                                                \
+    1024 // Bitmap color table size if it's needed, if bitdepth <= 8 by def.
+#define VERSION "0.4" // This is the 4th lesson / repo  of this program.
 
 enum ImageType { GRAY = 1, RGB = 3 };
-enum Mode { NO_MODE, COPY, TO_GRAY, TO_BW };
+enum Mode { NO_MODE, COPY, TO_GRAY, TO_MONO };
 
 typedef struct {
     unsigned char header[HEADER_SIZE];
@@ -24,7 +25,7 @@ typedef struct {
                         // with bitdepth.
     enum Mode output_mode;
     bool CT_EXISTS;
-    unsigned char colorTable[CT_SIZE];
+    unsigned char *colorTable;
     unsigned char **imageBuffer; //[imgSize][3], 3 for rgb
 } Bitmap;
 
@@ -39,11 +40,11 @@ char *mode_to_string(enum Mode mode) {
     case TO_GRAY:
         return "to Grayscale";
         break;
-    case TO_BW:
-        return "to Black & White";
+    case TO_MONO:
+        return "to Monochrome";
         break;
     default:
-        return "default / mode not found";
+        return "default: mode string not found";
     }
 }
 char *get_suffix(enum Mode mode) {
@@ -57,8 +58,8 @@ char *get_suffix(enum Mode mode) {
     case TO_GRAY:
         return "_gray";
         break;
-    case TO_BW:
-        return "_bw";
+    case TO_MONO:
+        return "_mono";
         break;
     default:
         return "_def";
@@ -98,7 +99,7 @@ void freeImage(Bitmap *bmp) {
 // returns false early and prints an error message if operation not complete.
 // returns true on success of the operation.
 bool readImage(char *filename1, Bitmap *bitmap) {
-    bitmap->imageType = 3; // multiplier for RGB
+    bitmap->imageType = 3; // RGB
 
     FILE *streamIn = fopen(filename1, "rb");
     if (streamIn == NULL) {
@@ -121,12 +122,17 @@ bool readImage(char *filename1, Bitmap *bitmap) {
     // if the bit depth is less than or equal to 8 then we need to read the
     // color table. The read content is going to be stored in colorTable.
     // Not all bitmap images have color tables.
-    if (bitmap->bitDepth <=
-        8) { // by definition of bitmap, <= 8 has a color table
+    if (bitmap->bitDepth <= 8) {
         bitmap->CT_EXISTS = true;
-    }
 
-    if (bitmap->CT_EXISTS) {
+        // Allocate memory for colorTable
+        bitmap->colorTable =
+            (unsigned char *)malloc(sizeof(char *) * CT_SIZE);
+        if (bitmap->imageBuffer == NULL) {
+            fprintf(stderr, "Error: Failed to allocate memory for color table.\n");
+            return false;
+        }
+
         fread(bitmap->colorTable, sizeof(char), CT_SIZE, streamIn);
     }
     // Allocate memory for the array of pointers (rows) for each pixel in
@@ -134,6 +140,7 @@ bool readImage(char *filename1, Bitmap *bitmap) {
     bitmap->imageBuffer =
         (unsigned char **)malloc(sizeof(char *) * bitmap->imageSize);
     if (bitmap->imageBuffer == NULL) {
+            fprintf(stderr, "Error: Failed to allocate memory for image buffer.\n");
         return false;
     }
 
@@ -212,6 +219,9 @@ void print_usage(char *app_name) {
     printf("Usage: %s [OPTIONS] <input_filename> [output_filename]\n"
            "\n"
            "OPTIONS:\n"
+           "  -g                   Convert image to grayscale\n"
+           "  -m (optional_separation_value: 0.0 to 1.0, defaults to 0.5)"
+           "                       Convert image to monochrome\n"
            "  -h, --help           Show this help message and exit\n"
            "  -v, --verbose        Enable verbose output\n"
            "  --version            Show the program version\n"
@@ -228,7 +238,7 @@ void print_usage(char *app_name) {
 
 int main(int argc, char *argv[]) {
     enum Mode mode = NO_MODE; // default
-    int opt = 0;
+    int option = 0;
 
     char *filename1 = NULL;
     char *filename2 = NULL;
@@ -244,9 +254,12 @@ int main(int argc, char *argv[]) {
 
     // Parse command-line options
     bool g_flag = false,      // gray
+        m_flag = false,       // monochrome
         h_flag = false,       // help
         v_flag = false,       // verbose
         version_flag = false; // version
+
+    float m_value = 0.5; // Default value to convert to monocrome
 
     struct option long_options[] = {
         {"help", no_argument, 0, 'h'},
@@ -261,8 +274,18 @@ int main(int argc, char *argv[]) {
           // in getopt.h
     };
 
-    while ((opt = getopt(argc, argv, "ghv")) != -1) {
-        switch (opt) {
+    while ((option = getopt(argc, argv, "m:ghv")) != -1) {
+        switch (option) {
+        case 'm':
+            m_flag = true;
+            m_value = atof(optarg);
+            printf("Flag -m: %.2f\n", m_value);
+            if (m_value < 0.0 || m_value > 1.0) {
+                fprintf(stderr,
+                        "Error: value for -m must be beween 0.0 and 1.0\n");
+            }
+            exit(EXIT_FAILURE);
+            break;
         case 'g': // mode: TO_GRAY, to grayscale image
             g_flag = true;
             break;
@@ -287,6 +310,8 @@ int main(int argc, char *argv[]) {
     // set the mode
     if (g_flag) {
         mode = TO_GRAY;
+    } else if (m_flag) {
+        mode = TO_MONO;
     } else {
         mode = COPY;
     }
@@ -368,7 +393,7 @@ int main(int argc, char *argv[]) {
                      .imageSize = 0,
                      .imageType = 0,
                      .CT_EXISTS = false,
-                     .colorTable = {0},
+                     .colorTable = NULL,
                      .imageBuffer = NULL,
                      .output_mode = NO_MODE};
     Bitmap *bitmapPtr = &bitmap;
