@@ -10,11 +10,10 @@
 #define HEADER_SIZE 54 // Bitmap file header size of every bmp
 #define CT_SIZE                                                                \
     1024 // Bitmap color table size if it's needed, if bitdepth <= 8 by def.
-#define WHITE 255
-#define BLACK 0
+
 #define VERSION "0.4" // This is the 4th lesson / repo  of this program.
 
-// enum ImageType { GRAY = 1, RGB = 3, RGBA = 4 };
+enum ImageType { ONE_CHANNEL = 1, RGB = 3, RGBA = 4 };
 enum Mode { NO_MODE, COPY, TO_GRAY, TO_MONO };
 
 typedef struct {
@@ -24,12 +23,13 @@ typedef struct {
     uint32_t imageSize;
     uint8_t bitDepth;
     uint8_t channels;
-    // uint32_t imageType; // 1 for gray, 3 for color,might end up having to do
-    //  with bitdepth.
+    float mono_threshold;
+
     enum Mode output_mode;
     bool CT_EXISTS;
     unsigned char *colorTable;
-    unsigned char **imageBuffer; //[imgSize][3], 3 for rgb
+    unsigned char *imageBuffer1; //[imgSize], 1 channel for 8-bit images or less
+    unsigned char **imageBuffer3; //[imgSize][3], 3 channel for rgb
 } Bitmap;
 
 char *mode_to_string(enum Mode mode) {
@@ -91,18 +91,23 @@ bool endsWith(char *str, const char *ext) {
 
 // free memory allocated for bitmap structs.
 void freeImage(Bitmap *bmp) {
-    if (bmp && bmp->imageBuffer) {
-        for (int i = 0; i < bmp->imageSize; i++) {
-            free(bmp->imageBuffer[i]);
+    if (bmp) {
+        if (bmp->imageBuffer1) {
+            free(bmp->imageBuffer1);
+            bmp->imageBuffer1 = NULL; // Avoid dangling pointer.
+        } else if (bmp->imageBuffer3) {
+            for (int i = 0; i < bmp->imageSize; i++) {
+                free(bmp->imageBuffer3[i]);
+            }
+            free(bmp->imageBuffer3);
+            bmp->imageBuffer3 = NULL; // Avoid dangling pointer.
         }
-        free(bmp->imageBuffer);
-        bmp->imageBuffer = NULL; // Avoid dangling pointer.
     }
 }
+
 // returns false early and prints an error message if operation not complete.
 // returns true on success of the operation.
 bool readImage(char *filename1, Bitmap *bitmap) {
-    // bitmap->imageType = 3; // RGB
     bool file_read_completed = false;
 
     FILE *streamIn = fopen(filename1, "rb");
@@ -123,16 +128,18 @@ bool readImage(char *filename1, Bitmap *bitmap) {
     bitmap->bitDepth = *(int *)&bitmap->header[28];
     bitmap->imageSize = bitmap->width * bitmap->height;
 
-    // if the bit depth is less than or equal to 8 then we need to read the
-    // color table. The read content is going to be stored in colorTable.
-    // Not all bitmap images have color tables.
+    // if the bit depth is 1 to 8 then it has a
+    // color table. 16-32 bit do not.
+    // The read content is going to be stored in colorTable.
+
     if (bitmap->bitDepth <= 8) {
+        // if bit depth < 8 i still want 1 channel.
         bitmap->channels = 1;
         bitmap->CT_EXISTS = true;
 
         // Allocate memory for colorTable
         bitmap->colorTable = (unsigned char *)malloc(sizeof(char *) * CT_SIZE);
-        if (bitmap->imageBuffer == NULL) {
+        if (bitmap->colorTable == NULL) {
             fprintf(stderr,
                     "Error: Failed to allocate memory for color table.\n");
             return false;
@@ -140,90 +147,142 @@ bool readImage(char *filename1, Bitmap *bitmap) {
 
         fread(bitmap->colorTable, sizeof(char), CT_SIZE, streamIn);
     } else {
-        bitmap->channels = bitmap->bitDepth /
-                           8; // 24 bit is 3 channel rbg, 32 bit is 32 bit rgba
+        // 24 bit is 3 channel rbg, 32 bit is 32 bit rgba
+        bitmap->channels = bitmap->bitDepth / 8;
+        printf("channel calculation line 152: %d", bitmap->channels);
     }
+    if (bitmap->channels == 1) {
+        // Allocate memory for image buffer
+        bitmap->imageBuffer1 =
+            (unsigned char *)malloc(sizeof(char *) * bitmap->imageSize);
+        if (bitmap->imageBuffer1 == NULL) {
+            fprintf(stderr,
+                    "Error: Failed to allocate memory for image buffer1.\n");
+            return false;
+        }
+        fread(bitmap->imageBuffer1, sizeof(char), bitmap->imageSize, streamIn);
 
-    if (bitmap->channels == 3) {
+        file_read_completed = true;
+    } else if (bitmap->channels == 3) {
 
         // Allocate memory for the array of pointers (rows) for each pixel in
         // imagesize
-        bitmap->imageBuffer =
+        bitmap->imageBuffer3 =
             (unsigned char **)malloc(sizeof(char *) * bitmap->imageSize);
-        if (bitmap->imageBuffer == NULL) {
+        if (bitmap->imageBuffer3 == NULL) {
             fprintf(stderr,
-                    "Error: Failed to allocate memory for image buffer.\n");
+                    "Error: Failed to allocate memory for image buffer3.\n");
             return false;
         }
 
         // Allocate memory for each row (RGB values for each pixel)
 
         for (int i = 0; i < bitmap->imageSize; i++) {
-            bitmap->imageBuffer[i] =
+            bitmap->imageBuffer3[i] =
                 (unsigned char *)malloc(bitmap->channels * sizeof(char *));
-            if (bitmap->imageBuffer[i] == NULL) {
+            if (bitmap->imageBuffer3[i] == NULL) {
                 return false;
             }
         }
 
         for (int i = 0; i < bitmap->imageSize; i++) {
-            bitmap->imageBuffer[i][0] = getc(streamIn); // red
-            bitmap->imageBuffer[i][1] = getc(streamIn); // green
-            bitmap->imageBuffer[i][2] = getc(streamIn); // blue
+            bitmap->imageBuffer3[i][0] = getc(streamIn); // red
+            bitmap->imageBuffer3[i][1] = getc(streamIn); // green
+            bitmap->imageBuffer3[i][2] = getc(streamIn); // blue
         }
-    file_read_completed = true;
+        file_read_completed = true;
+    } else if (bitmap->channels == 4) {
+        fprintf(stderr, "Error: not set up for 4 channel rgba\n");
+        exit(EXIT_FAILURE);
     }
     fclose(streamIn);
     return file_read_completed;
 }
 
-void writeImage(char *filename, Bitmap *bmp) {
+bool writeImage(char *filename, Bitmap *bmp) {
+    bool write_succesful = false;
     FILE *streamOut = fopen(filename, "wb");
-
-    fwrite(bmp->header, sizeof(char), HEADER_SIZE, streamOut);
-
-    if (bmp->CT_EXISTS) {
-        fwrite(bmp->colorTable, sizeof(char), CT_SIZE, streamOut);
-    }
-
-    // amount of rgb to keep, from 0.0 to 1.0.
-    float r = 0.0;
-    float g = 0.0;
-    float b = 0.0;
-
-    printf("RGB settings: %s\n", mode_to_string(bmp->output_mode));
-    if (bmp->output_mode == COPY) {
-
-        for (int i = 0; i < bmp->imageSize; i++) {
-            // Write equally for each channel.
-            putc(bmp->imageBuffer[i][0], streamOut); // red
-            putc(bmp->imageBuffer[i][1], streamOut); // green
-            putc(bmp->imageBuffer[i][2], streamOut); // blue
-        }
-
-    } else if (bmp->output_mode == TO_GRAY) {
-        // the values for mixing RGB to gray.
-        r = 0.30;
-        g = 0.59;
-        b = 0.11;
-
-        uint32_t temp = 0;
-        for (int i = 0; i < bmp->imageSize; i++) {
-            temp = (bmp->imageBuffer[i][0] * r) + (bmp->imageBuffer[i][1] * g) +
-                   (bmp->imageBuffer[i][2] * b);
-            // Write equally for each channel.
-            putc(temp, streamOut); // red
-            putc(temp, streamOut); // green
-            putc(temp, streamOut); // blue
-        }
-
-    } else {
-        fprintf(stderr, "Failed to set RGB\n");
-        fprintf(stderr, "R: %.2f\nG: %.2f B:%.2f\n", r, g, b);
+    if (streamOut == NULL) {
+        fprintf(stderr, "Error: failed to open output file %s\n", filename);
         exit(EXIT_FAILURE);
     }
+    fwrite(bmp->header, sizeof(char), HEADER_SIZE, streamOut);
 
+    printf("Output mode: %s\n", mode_to_string(bmp->output_mode));
+    // aka if (bmp->bitDepth <= 8), checked earlier
+    if (bmp->channels == ONE_CHANNEL) {
+        if (bmp->CT_EXISTS) {
+            fwrite(bmp->colorTable, sizeof(char), CT_SIZE, streamOut);
+        }
+        if (bmp->output_mode == COPY) {
+
+        } else if (bmp->output_mode == TO_MONO) {
+
+            // left shift bitdepth - 1 = bitdepth:white, 1:1, 2:3, 4:15, 8:255
+            // same as: WHITE = POW(2, bmp-bitDepth) - 1, POW from math.h
+            const uint8_t WHITE = (1 << bmp->bitDepth) - 1;
+            const uint8_t BLACK = 0;
+            uint8_t threshold = WHITE * bmp->mono_threshold;
+
+            if (threshold >= WHITE) {
+                for (int i = 0; i < bmp->imageSize; i++) {
+                    bmp->imageBuffer1[i] = WHITE;
+                }
+            } else if (threshold <= BLACK) {
+                for (int i = 0; i < bmp->imageSize; i++) {
+                    bmp->imageBuffer1[i] = BLACK;
+                }
+            } else {
+                // Black and White converter
+                for (int i = 0; i < bmp->imageSize; i++) {
+                    bmp->imageBuffer1[i] =
+                        (bmp->imageBuffer1[i] >= threshold) ? WHITE : BLACK;
+                }
+            }
+        }
+
+        fwrite(bmp->imageBuffer1, sizeof(char), bmp->imageSize, streamOut);
+
+    } else if (bmp->channels == RGB) {
+        // amount of rgb to keep, from 0.0 to 1.0.
+        float r = 0.0;
+        float g = 0.0;
+        float b = 0.0;
+
+        if (bmp->output_mode == COPY) {
+
+            for (int i = 0; i < bmp->imageSize; i++) {
+                // Write equally for each channel.
+                putc(bmp->imageBuffer3[i][0], streamOut); // red
+                putc(bmp->imageBuffer3[i][1], streamOut); // green
+                putc(bmp->imageBuffer3[i][2], streamOut); // blue
+            }
+
+        } else if (bmp->output_mode == TO_GRAY) {
+            // the values for mixing RGB to gray.
+            r = 0.30;
+            g = 0.59;
+            b = 0.11;
+
+            uint32_t temp = 0;
+            for (int i = 0; i < bmp->imageSize; i++) {
+                temp = (bmp->imageBuffer3[i][0] * r) +
+                       (bmp->imageBuffer3[i][1] * g) +
+                       (bmp->imageBuffer3[i][2] * b);
+                // Write equally for each channel.
+                putc(temp, streamOut); // red
+                putc(temp, streamOut); // green
+                putc(temp, streamOut); // blue
+            }
+
+        } else {
+            fprintf(stderr, "Failed to set RGB\n");
+            fprintf(stderr, "R: %.2f\nG: %.2f B:%.2f\n", r, g, b);
+            exit(EXIT_FAILURE);
+        }
+    }
     fclose(streamOut);
+    return write_succesful = true;
 }
 
 void print_version() { printf("Program version: %s\n", VERSION); }
@@ -249,6 +308,19 @@ void print_usage(char *app_name) {
            app_name);
 }
 
+// for checking float inputs from args
+bool is_valid_float(char *str) {
+    char *end;
+    strtod(str, &end);
+    return *end == '\0';
+}
+// check if a char is 0-9, or '.'
+bool is_dig(char value) {
+    printf("optarg[0]: %c\n", value);
+    printf("0:%d, 9:%d\n", '0', '9');
+    return ((value >= 0 && value <= 9) || value == '.');
+}
+
 int main(int argc, char *argv[]) {
     enum Mode mode = NO_MODE; // default
     int option = 0;
@@ -272,8 +344,8 @@ int main(int argc, char *argv[]) {
         v_flag = false,       // verbose
         version_flag = false; // version
 
-    float m_value =
-        0.5; // Default threshold to convert to black(0.0) or white (1.0)
+    // Will be defaulted to 0.5
+    float m_flag_value = 0.5;
 
     struct option long_options[] = {
         {"help", no_argument, 0, 'h'},
@@ -289,16 +361,40 @@ int main(int argc, char *argv[]) {
     };
 
     while ((option = getopt(argc, argv, "m:ghv")) != -1) {
+        printf("Optind: %d\n", optind);
         switch (option) {
         case 'm':
             m_flag = true;
-            m_value = atof(optarg);
-            printf("Flag -m: %.2f\n", m_value);
-            if (m_value < 0.0 || m_value > 1.0) {
-                fprintf(stderr,
-                        "Error: value for -m must be beween 0.0 and 1.0\n");
+            bool valid_m_input = false;
+
+            printf("m_flag is true.\n");
+            // Check both optarg and optarg[0] to ensure that optarg is not null
+            // and that the string is not empty.
+            if ((optarg) && is_dig(optarg[0])) {
+                float m_input;
+                printf("-m optarg is %s, first dig is %s\n", optarg,
+                       is_dig(optarg[0]) ? "true" : "false");
+                printf("is_valid_float: %s\n",
+                       is_valid_float(optarg) ? "true" : "false");
+                if (is_valid_float(optarg)) {
+                    printf("It's a valid float.\n");
+                    m_input = atof(optarg);
+                    if ((m_input >= 0.0) && (m_input <= 1.0)) {
+                        m_flag_value = m_input;
+                        printf("this value is fine %.2f\n", m_flag_value);
+                    } else {
+                        printf("-m value error \"%s\", defaulting to 0.5\n",
+                               optarg);
+                    }
+                }
+                printf("m_input: %.2f\n", m_input);
+                printf("m_flag_value: %.2f\n", m_flag_value);
+            } else {
+                // Adjust optind to reconsider the current argument as a
+                // non-option argument
+                optind--;
+                printf("reset called\n");
             }
-            exit(EXIT_FAILURE);
             break;
         case 'g': // mode: TO_GRAY, to grayscale image
             g_flag = true;
@@ -323,8 +419,18 @@ int main(int argc, char *argv[]) {
 
     // set the mode
     if (g_flag) {
+        if (m_flag) {
+            fprintf(stderr,
+                    "Error: Can only select one -m or -g flag at a time.");
+            exit(EXIT_FAILURE);
+        }
         mode = TO_GRAY;
     } else if (m_flag) {
+        if (g_flag) {
+            fprintf(stderr,
+                    "Error: Can only select one -m or -g flag at a time.");
+            exit(EXIT_FAILURE);
+        }
         mode = TO_MONO;
     } else {
         mode = COPY;
@@ -372,8 +478,8 @@ int main(int argc, char *argv[]) {
         size_t suffix_len = strlen(suffix);
         size_t extention_len = strlen(extension);
 
-        filename2 = (char *)calloc(base_len + suffix_len + extention_len + 1,
-                                   sizeof(char));
+        filename2 = (char *)malloc(sizeof(char) *
+                                   (base_len + suffix_len + extention_len + 1));
         if (filename2 == NULL) {
             printf("Memory allocation for output filename has failed.\n");
             exit(EXIT_FAILURE);
@@ -391,6 +497,8 @@ int main(int argc, char *argv[]) {
 
     if (v_flag) {
         printf("-g (to gray) flag: %s\n", g_flag ? "true" : "false");
+        printf("-m (to monochrome) flag: %s, value: %.2f\n",
+               m_flag ? "true" : "false", m_flag_value);
         printf("-h (help) flag:    %s\n", h_flag ? "true" : "false");
         printf("-v (verbose) flag: %s\n", v_flag ? "true" : "false");
         printf("--version flag:    %s\n", version_flag ? "true" : "false");
@@ -406,11 +514,14 @@ int main(int argc, char *argv[]) {
                      .bitDepth = 0,
                      .imageSize = 0,
                      .channels = 0,
+                     .mono_threshold = 0.0,
                      //.imageType = 0,
                      .CT_EXISTS = false,
                      .colorTable = NULL,
-                     .imageBuffer = NULL,
+                     .imageBuffer1 = NULL,
+                     .imageBuffer3 = NULL,
                      .output_mode = NO_MODE};
+
     Bitmap *bitmapPtr = &bitmap;
 
     bool imageRead = readImage(filename1, bitmapPtr);
@@ -432,6 +543,7 @@ int main(int argc, char *argv[]) {
         break;
     case TO_MONO:
         bitmapPtr->output_mode = TO_MONO;
+        bitmapPtr->mono_threshold = m_flag_value;
         break;
     default:
         fprintf(stderr, "No output mode matched.\n");
