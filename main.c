@@ -317,8 +317,8 @@ bool is_valid_float(char *str) {
 // check if a char is 0-9, or '.'
 bool is_dig(char value) {
     printf("optarg[0]: %c\n", value);
-    printf("0:%d, 9:%d\n", '0', '9');
-    return ((value >= 0 && value <= 9) || value == '.');
+
+    return ((value >= '0' && value <= '9') || value == '.');
 }
 
 int main(int argc, char *argv[]) {
@@ -365,35 +365,24 @@ int main(int argc, char *argv[]) {
         switch (option) {
         case 'm':
             m_flag = true;
-            bool valid_m_input = false;
-
-            printf("m_flag is true.\n");
             // Check both optarg and optarg[0] to ensure that optarg is not null
             // and that the string is not empty.
             if ((optarg) && is_dig(optarg[0])) {
                 float m_input;
-                printf("-m optarg is %s, first dig is %s\n", optarg,
-                       is_dig(optarg[0]) ? "true" : "false");
-                printf("is_valid_float: %s\n",
-                       is_valid_float(optarg) ? "true" : "false");
                 if (is_valid_float(optarg)) {
-                    printf("It's a valid float.\n");
                     m_input = atof(optarg);
                     if ((m_input >= 0.0) && (m_input <= 1.0)) {
                         m_flag_value = m_input;
-                        printf("this value is fine %.2f\n", m_flag_value);
                     } else {
-                        printf("-m value error \"%s\", defaulting to 0.5\n",
-                               optarg);
+                        fprintf(stderr,
+                                "-m value error \"%s\", defaulting to %.1f\n",
+                                optarg, m_flag_value);
                     }
                 }
-                printf("m_input: %.2f\n", m_input);
-                printf("m_flag_value: %.2f\n", m_flag_value);
             } else {
                 // Adjust optind to reconsider the current argument as a
                 // non-option argument
                 optind--;
-                printf("reset called\n");
             }
             break;
         case 'g': // mode: TO_GRAY, to grayscale image
